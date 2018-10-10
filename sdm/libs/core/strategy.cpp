@@ -82,6 +82,9 @@ DisplayError Strategy::Start(HWLayersInfo *hw_layers_info, uint32_t *max_attempt
 
   hw_layers_info_ = hw_layers_info;
   extn_start_success_ = false;
+#ifdef OLD_GPU_COMPOSITION_HANDLING
+  tried_default_ = false;
+#endif
 
   if (!disable_gpu_comp_ && !hw_layers_info_->gpu_target_index) {
     DLOGE("GPU composition is enabled and GPU target buffer not provided.");
@@ -115,14 +118,32 @@ DisplayError Strategy::Stop() {
 }
 
 DisplayError Strategy::GetNextStrategy(StrategyConstraints *constraints) {
+#ifdef OLD_GPU_COMPOSITION_HANDLING
+  DisplayError error = kErrorNone;
+#endif
+
   if (extn_start_success_) {
+#ifdef OLD_GPU_COMPOSITION_HANDLING
+    error = strategy_intf_->GetNextStrategy(constraints);
+    if (error == kErrorNone) {
+      return kErrorNone;
+    }
+#else
     return strategy_intf_->GetNextStrategy(constraints);
+#endif
   }
 
   // Do not fallback to GPU if GPU comp is disabled.
   if (disable_gpu_comp_) {
     return kErrorNotSupported;
   }
+
+#ifdef OLD_GPU_COMPOSITION_HANDLING
+   // Default composition is already tried.
+  if (tried_default_) {
+    return kErrorUndefined;
+  }
+#endif
 
   // Mark all application layers for GPU composition. Find GPU target buffer and store its index for
   // programming the hardware.
@@ -132,6 +153,26 @@ DisplayError Strategy::GetNextStrategy(StrategyConstraints *constraints) {
     layer_stack->layers.at(i)->request.flags.request_flags = 0;  // Reset layer request
   }
 
+#ifdef OLD_GPU_COMPOSITION_HANDLING
+  if (!extn_start_success_) {
+    // When mixer resolution and panel resolutions are same (1600x2560) and FB resolution is
+    // 1080x1920 FB_Target destination coordinates(mapped to FB resolution 1080x1920) need to
+    // be mapped to destination coordinates of mixer resolution(1600x2560).
+    Layer *gpu_target_layer = layer_stack->layers.at(hw_layers_info_->gpu_target_index);
+    float layer_mixer_width = FLOAT(mixer_attributes_.width);
+    float layer_mixer_height = FLOAT(mixer_attributes_.height);
+    float fb_width = FLOAT(fb_config_.x_pixels);
+    float fb_height = FLOAT(fb_config_.y_pixels);
+    LayerRect src_domain = (LayerRect){0.0f, 0.0f, fb_width, fb_height};
+    LayerRect dst_domain = (LayerRect){0.0f, 0.0f, layer_mixer_width, layer_mixer_height};
+     Layer layer = *gpu_target_layer;
+    hw_layers_info_->index[0] = hw_layers_info_->gpu_target_index;
+    MapRect(src_domain, dst_domain, layer.dst_rect, &layer.dst_rect);
+    hw_layers_info_->hw_layers.clear();
+    hw_layers_info_->hw_layers.push_back(layer);
+  }
+   tried_default_ = true;
+#else
   // When mixer resolution and panel resolutions are same (1600x2560) and FB resolution is
   // 1080x1920 FB_Target destination coordinates(mapped to FB resolution 1080x1920) need to
   // be mapped to destination coordinates of mixer resolution(1600x2560).
@@ -148,6 +189,7 @@ DisplayError Strategy::GetNextStrategy(StrategyConstraints *constraints) {
   MapRect(src_domain, dst_domain, layer.dst_rect, &layer.dst_rect);
   hw_layers_info_->hw_layers.clear();
   hw_layers_info_->hw_layers.push_back(layer);
+#endif
 
   return kErrorNone;
 }

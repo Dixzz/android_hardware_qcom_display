@@ -68,6 +68,9 @@ class Strategy {
   HWDisplayAttributes display_attributes_ = {};
   DisplayConfigVariableInfo fb_config_ = {};
   bool extn_start_success_ = false;
+#ifdef OLD_GPU_COMPOSITION_HANDLING
+  bool tried_default_ = false;
+#endif
   bool disable_gpu_comp_ = false;
   BufferAllocator *buffer_allocator_ = NULL;
 };
